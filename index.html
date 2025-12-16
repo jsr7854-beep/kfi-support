@@ -732,6 +732,7 @@
       const [currentPage, setCurrentPage] = useState('home');
       const [selectedProgram, setSelectedProgram] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
+      const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
       const [selectedCategory, setSelectedCategory] = useState('전체');
       const [activeModal, setActiveModal] = useState(null);
       const [reviewModal, setReviewModal] = useState(null);
@@ -749,6 +750,14 @@
       const [chatInput, setChatInput] = useState('');
 
       useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
+      
+      // 검색어 디바운스 처리 (300ms 후에 실제 필터링에 적용)
+      useEffect(() => {
+        const timer = setTimeout(() => {
+          setDebouncedSearchQuery(searchQuery);
+        }, 300);
+        return () => clearTimeout(timer);
+      }, [searchQuery]);
       
       // 테스트 사용자 로그인 처리
       useEffect(() => {
@@ -948,9 +957,9 @@
 
       const filteredPrograms = useMemo(() => 
         programsWithDday.filter(p => 
-          p.title.toLowerCase().includes(searchQuery.toLowerCase()) && 
+          p.title.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) && 
           (selectedCategory === '전체' || p.category === selectedCategory)
-        ), [programsWithDday, searchQuery, selectedCategory]);
+        ), [programsWithDday, debouncedSearchQuery, selectedCategory]);
 
       const matchedPrograms = useMemo(() => {
         if (!userPreferences.targetTags?.length && !userPreferences.subcategories?.length) return [];
@@ -1205,15 +1214,17 @@
         const [isComposing, setIsComposing] = useState(false);
         const inputRef = React.useRef(null);
         
+        // 외부 value가 변경되었을 때만 localValue 업데이트 (조합 중이 아닐 때)
         useEffect(() => {
-          if (!isComposing) {
+          if (!isComposing && value !== localValue) {
             setLocalValue(value);
           }
-        }, [value, isComposing]);
+        }, [value]);
         
         const handleChange = (e) => {
           const newValue = e.target.value;
           setLocalValue(newValue);
+          // 조합 중이 아닐 때만 부모에게 전달
           if (!isComposing) {
             onChange(newValue);
           }
@@ -1225,7 +1236,9 @@
         
         const handleCompositionEnd = (e) => {
           setIsComposing(false);
-          onChange(e.target.value);
+          const finalValue = e.target.value;
+          setLocalValue(finalValue);
+          onChange(finalValue);
         };
         
         return (
@@ -1242,6 +1255,58 @@
               onCompositionEnd={handleCompositionEnd}
             />
           </div>
+        );
+      };
+      
+      // 챗봇 입력 컴포넌트 (한글 조합 지원)
+      const ChatInput = ({ value, onChange, onSubmit, placeholder }) => {
+        const [localValue, setLocalValue] = useState(value);
+        const [isComposing, setIsComposing] = useState(false);
+        const inputRef = React.useRef(null);
+        
+        useEffect(() => {
+          if (!isComposing && value !== localValue) {
+            setLocalValue(value);
+          }
+        }, [value]);
+        
+        const handleChange = (e) => {
+          const newValue = e.target.value;
+          setLocalValue(newValue);
+          if (!isComposing) {
+            onChange(newValue);
+          }
+        };
+        
+        const handleCompositionStart = () => {
+          setIsComposing(true);
+        };
+        
+        const handleCompositionEnd = (e) => {
+          setIsComposing(false);
+          const finalValue = e.target.value;
+          setLocalValue(finalValue);
+          onChange(finalValue);
+        };
+        
+        const handleKeyPress = (e) => {
+          if (e.key === 'Enter' && !isComposing) {
+            onSubmit();
+          }
+        };
+        
+        return (
+          <input 
+            ref={inputRef}
+            type="text" 
+            value={localValue} 
+            onChange={handleChange}
+            onKeyPress={handleKeyPress}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            placeholder={placeholder}
+            className="flex-1 px-4 py-3 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         );
       };
 
@@ -1860,8 +1925,25 @@
       const MyPageModal = () => { 
         if (!activeModal) return null;
         
-        const APP_VERSION = "1.0.2";
+        const APP_VERSION = "1.0.4";
         const patchNotes = [
+          {
+            version: "1.0.4",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창 및 챗봇 입력 시 키보드가 닫히는 오류 수정" },
+              { type: "fix", text: "한글 입력 중 포커스 유실 문제 해결" },
+              { type: "improve", text: "검색 성능 개선 (디바운스 적용)" },
+            ]
+          },
+          {
+            version: "1.0.3",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "챗봇 질문 버튼 클릭 시 화면 깜빡임 현상 수정" },
+              { type: "improve", text: "챗봇 모달 애니메이션 안정성 개선" },
+            ]
+          },
           {
             version: "1.0.2",
             date: "2025.01.16",
@@ -2034,11 +2116,39 @@
       // 챗봇 모달
       const ChatbotModal = () => {
         const chatContainerRef = React.useRef(null);
+        const modalRef = React.useRef(null);
+        const hasAnimated = React.useRef(false);
         
         useEffect(() => {
-          // 부모 컨테이너 내에서만 스크롤
+          // 애니메이션 완료 후 클래스 제거
+          if (showChatbot && modalRef.current && !hasAnimated.current) {
+            const timer = setTimeout(() => {
+              if (modalRef.current) {
+                modalRef.current.style.animation = 'none';
+                modalRef.current.style.transform = 'translateY(0)';
+                modalRef.current.style.opacity = '1';
+              }
+              hasAnimated.current = true;
+            }, 350);
+            return () => clearTimeout(timer);
+          }
+        }, [showChatbot]);
+        
+        useEffect(() => {
+          // 모달이 닫힐 때 애니메이션 상태 리셋
+          if (!showChatbot) {
+            hasAnimated.current = false;
+          }
+        }, [showChatbot]);
+        
+        useEffect(() => {
+          // 부모 컨테이너 내에서만 스크롤 (setTimeout으로 DOM 업데이트 후 실행)
           if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+            setTimeout(() => {
+              if (chatContainerRef.current) {
+                chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+              }
+            }, 10);
           }
         }, [chatMessages]);
         
@@ -2058,6 +2168,7 @@
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setShowChatbot(false)}>
             <div 
+              ref={modalRef}
               className="bg-white w-full max-w-lg h-[70vh] rounded-t-3xl overflow-hidden flex flex-col animate-slide-up"
               onClick={e => e.stopPropagation()}
             >
@@ -2095,13 +2206,11 @@
               
               {/* 입력 영역 */}
               <div className="p-4 bg-white border-t flex gap-2">
-                <input 
-                  type="text" 
-                  value={chatInput} 
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyPress={e => e.key === 'Enter' && handleChatSubmit()}
-                  placeholder="질문을 입력하세요..." 
-                  className="flex-1 px-4 py-3 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <ChatInput 
+                  value={chatInput}
+                  onChange={setChatInput}
+                  onSubmit={handleChatSubmit}
+                  placeholder="질문을 입력하세요..."
                 />
                 <button type="button" onClick={handleChatSubmit} className="w-12 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center">
                   <Icon name="send" className="w-5 h-5" />
