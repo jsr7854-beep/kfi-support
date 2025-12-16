@@ -1241,7 +1241,11 @@
                       if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         e.target.blur();
-                        setSearchQuery(e.target.value.trim());
+                        const query = e.target.value.trim();
+                        if (query) {
+                          setSearchQuery(query);
+                          setCurrentPage('list');
+                        }
                       }
                     }}
                   />
@@ -1252,7 +1256,11 @@
                     const input = document.getElementById('searchInputField');
                     if (input) {
                       input.blur();
-                      setSearchQuery(input.value.trim());
+                      const query = input.value.trim();
+                      if (query) {
+                        setSearchQuery(query);
+                        setCurrentPage('list');
+                      }
                     }
                   }}
                   className="px-5 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl text-white font-semibold text-sm transition-colors"
