@@ -732,7 +732,6 @@
       const [currentPage, setCurrentPage] = useState('home');
       const [selectedProgram, setSelectedProgram] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
-      const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
       const [selectedCategory, setSelectedCategory] = useState('전체');
       const [activeModal, setActiveModal] = useState(null);
       const [reviewModal, setReviewModal] = useState(null);
@@ -747,17 +746,8 @@
       const [chatMessages, setChatMessages] = useState([
         { role: 'bot', text: '안녕하세요! KFI 지원사업 챗봇입니다. 무엇을 도와드릴까요?' }
       ]);
-      const [chatInput, setChatInput] = useState('');
 
       useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
-      
-      // 검색어 디바운스 처리 (300ms 후에 실제 필터링에 적용)
-      useEffect(() => {
-        const timer = setTimeout(() => {
-          setDebouncedSearchQuery(searchQuery);
-        }, 300);
-        return () => clearTimeout(timer);
-      }, [searchQuery]);
       
       // 테스트 사용자 로그인 처리
       useEffect(() => {
@@ -924,24 +914,13 @@
         '도움': '다음 키워드로 질문해보세요: 특허, 해외, 신청, 마감, 문의, 금융, 전시회, 자격, 서류'
       };
 
-      const handleChatSubmit = () => {
-        if (!chatInput.trim()) return;
-        
-        const userMessage = chatInput.trim();
-        setChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
-        setChatInput('');
-        
-        // 응답 찾기
+      const handleQuickChat = (msg) => {
+        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
         setTimeout(() => {
-          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
-          
+          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.';
           for (const [keyword, answer] of Object.entries(chatbotResponses)) {
-            if (userMessage.includes(keyword)) {
-              response = answer;
-              break;
-            }
+            if (msg.includes(keyword)) { response = answer; break; }
           }
-          
           setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
         }, 500);
       };
@@ -955,11 +934,27 @@
         }));
       }, [programs]);
 
-      const filteredPrograms = useMemo(() => 
-        programsWithDday.filter(p => 
-          p.title.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) && 
-          (selectedCategory === '전체' || p.category === selectedCategory)
-        ), [programsWithDday, debouncedSearchQuery, selectedCategory]);
+      const filteredPrograms = useMemo(() => {
+        const query = searchQuery.toLowerCase().trim();
+        return programsWithDday.filter(p => {
+          // 검색어가 없으면 카테고리 필터만 적용
+          if (!query) {
+            return selectedCategory === '전체' || p.category === selectedCategory;
+          }
+          // 검색어가 있으면 여러 필드에서 검색
+          const searchFields = [
+            p.title,
+            p.category,
+            p.subcategory,
+            p.description,
+            ...(p.targetTags || [])
+          ].filter(Boolean).join(' ').toLowerCase();
+          
+          const matchesSearch = searchFields.includes(query);
+          const matchesCategory = selectedCategory === '전체' || p.category === selectedCategory;
+          return matchesSearch && matchesCategory;
+        });
+      }, [programsWithDday, searchQuery, selectedCategory]);
 
       const matchedPrograms = useMemo(() => {
         if (!userPreferences.targetTags?.length && !userPreferences.subcategories?.length) return [];
@@ -1208,108 +1203,6 @@
         );
       };
 
-      // 검색 입력 컴포넌트 - 한글 입력 문제 해결
-      const SearchInput = ({ value, onChange }) => {
-        const [localValue, setLocalValue] = useState(value);
-        const [isComposing, setIsComposing] = useState(false);
-        const inputRef = React.useRef(null);
-        
-        // 외부 value가 변경되었을 때만 localValue 업데이트 (조합 중이 아닐 때)
-        useEffect(() => {
-          if (!isComposing && value !== localValue) {
-            setLocalValue(value);
-          }
-        }, [value]);
-        
-        const handleChange = (e) => {
-          const newValue = e.target.value;
-          setLocalValue(newValue);
-          // 조합 중이 아닐 때만 부모에게 전달
-          if (!isComposing) {
-            onChange(newValue);
-          }
-        };
-        
-        const handleCompositionStart = () => {
-          setIsComposing(true);
-        };
-        
-        const handleCompositionEnd = (e) => {
-          setIsComposing(false);
-          const finalValue = e.target.value;
-          setLocalValue(finalValue);
-          onChange(finalValue);
-        };
-        
-        return (
-          <div className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" /></div>
-            <input 
-              ref={inputRef}
-              type="text" 
-              placeholder="지원사업 검색" 
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm" 
-              value={localValue} 
-              onChange={handleChange}
-              onCompositionStart={handleCompositionStart}
-              onCompositionEnd={handleCompositionEnd}
-            />
-          </div>
-        );
-      };
-      
-      // 챗봇 입력 컴포넌트 (한글 조합 지원)
-      const ChatInput = ({ value, onChange, onSubmit, placeholder }) => {
-        const [localValue, setLocalValue] = useState(value);
-        const [isComposing, setIsComposing] = useState(false);
-        const inputRef = React.useRef(null);
-        
-        useEffect(() => {
-          if (!isComposing && value !== localValue) {
-            setLocalValue(value);
-          }
-        }, [value]);
-        
-        const handleChange = (e) => {
-          const newValue = e.target.value;
-          setLocalValue(newValue);
-          if (!isComposing) {
-            onChange(newValue);
-          }
-        };
-        
-        const handleCompositionStart = () => {
-          setIsComposing(true);
-        };
-        
-        const handleCompositionEnd = (e) => {
-          setIsComposing(false);
-          const finalValue = e.target.value;
-          setLocalValue(finalValue);
-          onChange(finalValue);
-        };
-        
-        const handleKeyPress = (e) => {
-          if (e.key === 'Enter' && !isComposing) {
-            onSubmit();
-          }
-        };
-        
-        return (
-          <input 
-            ref={inputRef}
-            type="text" 
-            value={localValue} 
-            onChange={handleChange}
-            onKeyPress={handleKeyPress}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            placeholder={placeholder}
-            className="flex-1 px-4 py-3 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        );
-      };
-
       const Header = () => (
         <header className="bg-gradient-to-r from-slate-800 to-slate-700 text-white sticky top-0 z-50 safe-top">
           <div className="px-4 py-4">
@@ -1330,7 +1223,34 @@
               </div>
             </div>
             {!isAdmin && (
-              <SearchInput value={searchQuery} onChange={setSearchQuery} />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" /></div>
+                  <input 
+                    id="searchInputField"
+                    type="text" 
+                    placeholder="지원사업 검색 (예: 특허, 해외)" 
+                    className="w-full pl-12 pr-4 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm" 
+                    defaultValue=""
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        setSearchQuery(e.target.value);
+                      }
+                    }}
+                  />
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const input = document.getElementById('searchInputField');
+                    if (input) setSearchQuery(input.value);
+                  }}
+                  className="px-4 py-3 bg-white rounded-xl text-slate-700 font-medium text-sm"
+                >
+                  검색
+                </button>
+              </div>
             )}
           </div>
         </header>
@@ -1643,7 +1563,25 @@
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-slate-500">총 {filteredPrograms.length}개의 지원사업</p>
+              <p className="text-xs text-slate-500">
+                총 {filteredPrograms.length}개의 지원사업
+                {searchQuery && (
+                  <span className="ml-2">
+                    (검색어: "{searchQuery}" 
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setSearchQuery('');
+                        const input = document.getElementById('searchInputField');
+                        if (input) input.value = '';
+                      }}
+                      className="ml-1 text-blue-600 underline"
+                    >
+                      초기화
+                    </button>)
+                  </span>
+                )}
+              </p>
             </div>
             
             {/* 그리드 뷰 - 3열 */}
@@ -1925,15 +1863,40 @@
       const MyPageModal = () => { 
         if (!activeModal) return null;
         
-        const APP_VERSION = "1.0.4";
+        const APP_VERSION = "1.0.7";
         const patchNotes = [
+          {
+            version: "1.0.7",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "모바일 키보드 드롭 현상 해결" },
+              { type: "new", text: "검색 버튼 추가 (모바일 사용성 개선)" },
+              { type: "new", text: "검색어 초기화 기능 추가" },
+              { type: "improve", text: "한글 입력 중 엔터키 오동작 방지" },
+            ]
+          },
+          {
+            version: "1.0.6",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창/챗봇 입력 시 키보드 드롭 현상 완전 해결" },
+              { type: "improve", text: "입력 방식 개선 (엔터키로 검색/전송)" },
+              { type: "improve", text: "지원사업 통합 검색 기능 (제목, 카테고리, 태그)" },
+            ]
+          },
+          {
+            version: "1.0.5",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창/챗봇 입력 시 키보드가 닫히는 오류 수정" },
+              { type: "improve", text: "지원사업 검색 기능 개선 (제목, 카테고리, 태그 등 통합 검색)" },
+            ]
+          },
           {
             version: "1.0.4",
             date: "2025.01.16",
             changes: [
-              { type: "fix", text: "검색창 및 챗봇 입력 시 키보드가 닫히는 오류 수정" },
-              { type: "fix", text: "한글 입력 중 포커스 유실 문제 해결" },
-              { type: "improve", text: "검색 성능 개선 (디바운스 적용)" },
+              { type: "fix", text: "입력 관련 안정성 개선" },
             ]
           },
           {
@@ -2206,13 +2169,46 @@
               
               {/* 입력 영역 */}
               <div className="p-4 bg-white border-t flex gap-2">
-                <ChatInput 
-                  value={chatInput}
-                  onChange={setChatInput}
-                  onSubmit={handleChatSubmit}
-                  placeholder="질문을 입력하세요..."
+                <input 
+                  id="chatInputField"
+                  type="text" 
+                  defaultValue=""
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      const input = e.target;
+                      const msg = input.value.trim();
+                      if (msg) {
+                        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+                        input.value = '';
+                        setTimeout(() => {
+                          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
+                          for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+                            if (msg.includes(keyword)) { response = answer; break; }
+                          }
+                          setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+                        }, 500);
+                      }
+                    }
+                  }}
+                  placeholder="질문을 입력하세요..." 
+                  className="flex-1 px-4 py-3 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button type="button" onClick={handleChatSubmit} className="w-12 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center">
+                <button type="button" onClick={() => {
+                  const input = document.getElementById('chatInputField');
+                  const msg = input?.value?.trim();
+                  if (msg) {
+                    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+                    input.value = '';
+                    setTimeout(() => {
+                      let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
+                      for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+                        if (msg.includes(keyword)) { response = answer; break; }
+                      }
+                      setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+                    }, 500);
+                  }
+                }} className="w-12 h-12 bg-blue-600 text-white rounded-xl flex items-center justify-center">
                   <Icon name="send" className="w-5 h-5" />
                 </button>
               </div>
