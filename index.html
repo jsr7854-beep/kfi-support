@@ -416,6 +416,10 @@
       { id: 3, name: "Intersec Dubai", location: "UAE 두바이", country: "🇦🇪", startDate: "2026-01-12", endDate: "2026-01-14", color: "from-red-600 to-red-400" }
     ];
 
+    // React에서 접근할 수 있도록 전역 변수로 설정
+    window.defaultPrograms = defaultPrograms;
+    window.defaultExhibitions = defaultExhibitions;
+
     window.firebaseAPI = {
       auth, db,
       
@@ -726,7 +730,7 @@
       const [currentUser, setCurrentUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
       const [showSignup, setShowSignup] = useState(false);
-      const [programs, setPrograms] = useState([]);
+      const [programs, setPrograms] = useState(window.defaultPrograms || []);
       const [exhibitions, setExhibitions] = useState([]);
       const [allUsers, setAllUsers] = useState([]);
       const [userApplications, setUserApplications] = useState([]);
@@ -1241,11 +1245,7 @@
                       if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         e.target.blur();
-                        const query = e.target.value.trim();
-                        if (query) {
-                          setSearchQuery(query);
-                          setCurrentPage('list');
-                        }
+                        setSearchQuery(e.target.value.trim());
                       }
                     }}
                   />
@@ -1256,11 +1256,7 @@
                     const input = document.getElementById('searchInputField');
                     if (input) {
                       input.blur();
-                      const query = input.value.trim();
-                      if (query) {
-                        setSearchQuery(query);
-                        setCurrentPage('list');
-                      }
+                      setSearchQuery(input.value.trim());
                     }
                   }}
                   className="px-5 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl text-white font-semibold text-sm transition-colors"
@@ -1518,7 +1514,7 @@
               <button type="button" onClick={() => setCurrentPage('list')} className="text-sm text-blue-600 font-medium">전체보기 →</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {programsWithDday.filter(p => !p.isClosed && (p.status === 'open' || p.status === 'always')).slice(0, 6).map(program => <ProgramCard key={program.id || program.docId} program={program} viewMode="grid" />)}
+              {programsWithDday.slice(0, 6).map(program => <ProgramCard key={program.id || program.docId} program={program} viewMode="grid" />)}
             </div>
           </section>
         </div>
