@@ -24,7 +24,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260310-001'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260310-004'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -44,6 +44,44 @@
     })();
   </script>
 
+  <!-- PWA 서비스워커 등록 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // 인라인 서비스워커 (별도 파일 불필요)
+        const swCode = `
+          const CACHE_NAME = 'kfi-v1';
+          const CACHE_URLS = ['./', './index.html'];
+          self.addEventListener('install', e => {
+            e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CACHE_URLS)).then(() => self.skipWaiting()));
+          });
+          self.addEventListener('activate', e => {
+            e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+          });
+          self.addEventListener('fetch', e => {
+            // version.json은 항상 네트워크에서 (캐시 금지)
+            if (e.request.url.includes('version.json')) {
+              e.respondWith(fetch(e.request, { cache: 'no-store' }).catch(() => new Response('{}', {headers:{'Content-Type':'application/json'}})));
+              return;
+            }
+            // Firebase/CDN은 네트워크 우선
+            if (e.request.url.includes('firebase') || e.request.url.includes('cdnjs') || e.request.url.includes('cdn.tailwind')) {
+              e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+              return;
+            }
+            // 나머지는 캐시 우선
+            e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+          });
+        `;
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(swUrl)
+          .then(reg => console.log('[KFI] SW 등록:', reg.scope))
+          .catch(err => console.log('[KFI] SW 실패:', err));
+      });
+    }
+  </script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -60,9 +98,9 @@
       theme_color: "#1d408b",
       orientation: "portrait",
       icons: [{
-        src: "",
+        src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%231e3a5f'/><text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' font-size='200' font-family='Arial Black,sans-serif' font-weight='900' fill='white'>KFI</text></svg>",
         sizes: "512x512",
-        type: "image/webp",
+        type: "image/svg+xml",
         purpose: "any maskable"
       }]
     };
@@ -92,125 +130,116 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // 2025년 포스터 기준 지원사업 데이터 (국내사업, 해외사업, 정보제공 3개 분류)
+    // HWP 리플릿 기준 지원사업 데이터
     const defaultPrograms = [
       // ===== 국내사업 =====
       { 
         id: 1, 
-        title: "국내외 특허 출원·등록 경비 지원", 
+        title: "국내외 특허출원·등록 경비 지원",
         category: "국내사업",
-        subcategory: "특허",
-        status: "open", 
-        amount: "최대 500만원", 
-        deadline: "2025-08-31", 
-        description: "소방산업 분야의 기술경쟁력 강화를 위해 국내외 특허 출원 및 등록에 소요되는 경비를 지원합니다. 국내특허, 해외특허(PCT 포함), 국제출원 등 다양한 형태의 특허 비용을 지원받으실 수 있습니다.", 
-        target: "통계청 산업특수분류에 의한 소방산업 종사자 및 기업(단체)",
-        targetTags: ["소방산업체", "제조업체", "특허보유"],
+        subcategory: "특허·경비",
+        status: "open",
+        amount: "최대 500만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "소방관계 법령에 따른 형식승인·성능인증 등 인증 취득에 소요되는 비용 및 기술원 사전 의뢰시험 수수료를 지원합니다. 발명전시회 참가비, 홍보경비(최대 500만원, 비용 50% 이내), ESG 인증경비(최대 200만원) 포함. 설명회 3월·8월(예정), 누리집 온라인 접수.",
+        target: "소방산업 관련 기업·단체",
+        targetTags: ["소방산업체", "제조업체"],
         details: [
-          { item: "국내특허 출원", value: "100만원" }, 
-          { item: "국내특허 등록", value: "100만원" },
-          { item: "해외특허 출원", value: "200만원" },
-          { item: "해외특허 등록", value: "300만원" },
-          { item: "PCT 국제출원", value: "270만원" }
-        ], 
-        contact: { dept: "산업진흥센터", phone: "031-289-2730", email: "support@kfi.or.kr" }, 
-        documents: ["지원신청서", "사업자등록증", "특허출원·등록 증빙서류", "비용 증빙서류"],
+          { item: "형식승인·성능인증 등 인증경비", value: "취득 비용 지원 (특허별 차년도까지)" },
+          { item: "사전 의뢰시험 수수료", value: "인증 취득 관련 기술원 수행분" },
+          { item: "홍보경비", value: "최대 500만원 (비용 50% 이내)" },
+          { item: "발명전시회 참가비", value: "지원" },
+          { item: "ESG 인증경비", value: "최대 200만원" },
+          { item: "기술상담(내부)", value: "특허권 확보 절차 멘토링, 선행기술 조사·사업성 검토" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "사업자등록증", "경비 증빙서류"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
       { 
         id: 2, 
-        title: "소방산업 지식재산 사업화 지원", 
+        title: "소방산업체 금융 경비 지원",
         category: "국내사업",
-        subcategory: "특허",
-        status: "closed", 
-        amount: "최대 4천만원", 
-        deadline: "2025-05-31", 
-        description: "전년도 특허 지원사업을 통해 기술(지식)재산권을 보유하거나 소방산업대상 기술진흥분야 수상기술의 사업화를 지원합니다. 시제품 제작, 인증취득, 마케팅 등 사업화에 필요한 전반적인 비용을 지원합니다.", 
-        target: "전년도 특허 지원사업 기술재산권 보유 기업 및 소방산업대상 기술진흥부문 수상기업",
-        targetTags: ["특허보유", "수상기업"],
+        subcategory: "금융",
+        status: "open",
+        amount: "연 50만원 한도",
+        openDate: "2026-04-01",
+        deadline: "2026-09-30",
+        description: "소방산업체의 안정적인 경영활동을 위해 이행(하자)보증보험료 및 융자금리 이자비용을 지원합니다. 접수: 4월~8월 / 지원금 지급: 10월(예정).",
+        target: "소방산업 관련 기업",
+        targetTags: ["소방산업체", "제조업체"],
         details: [
-          { item: "지원비율", value: "총 사업비의 80%" }, 
-          { item: "최대한도", value: "4천만원" },
-          { item: "자부담", value: "20% 이상" }
-        ], 
-        contact: { dept: "산업진흥센터", phone: "031-289-2730", email: "support@kfi.or.kr" }, 
-        documents: ["사업계획서", "사업자등록증", "특허등록증 사본"],
+          { item: "HP보증보험료", value: "50% 지원 (연 50만원 한도)" },
+          { item: "융자금리", value: "실 지급이자의 50% (연 50만원 한도)" },
+          { item: "접수기간", value: "4월~8월" },
+          { item: "지급 시기", value: "10월(예정)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "보험료 납입영수증", "이자납입 증빙서류"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
       { 
         id: 3, 
-        title: "소방산업체 금융 경비 지원", 
+        title: "지식재산(IP) 금융 지원사업",
         category: "국내사업",
-        subcategory: "금융",
-        status: "open", 
-        amount: "보증료 50% 지원", 
-        deadline: "2025-12-31", 
-        description: "소방산업체의 안정적인 경영활동을 위해 이행(하자)보증보험료 및 중소기업진흥공단 융자비용을 지원합니다. HP보증보험료와 융자금리 이자비용을 절감할 수 있습니다.", 
-        target: "기술원 형식승인 및 검사실적 보유 제조업체, 설계업·시공업·감리업·점검업 등록업체",
-        targetTags: ["제조업체", "설계업", "시공업", "감리업", "점검업"],
+        subcategory: "IP금융",
+        status: "open",
+        amount: "최대 300만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "IP 관련 대출(담보·운전자금 등)의 2% 이자를 지원합니다. 총 3.5천만원 예산 한도 내 선착순 모집, 예산 소진 시 조기 마감됩니다.",
+        target: "최근 5년 이내(2021~2025년) 특허경비 지원사업 참여업체 중, 공고일 기준 최근 1년 이내 기술원 인증·검사 실적(방염성능검사 및 소방장비인증(KFAC) 포함) 보유 업체",
+        targetTags: ["특허보유", "소방산업체"],
         details: [
-          { item: "HP보증보험료", value: "50% 지원 (연 50만원 한도)" },
-          { item: "융자금리", value: "실 지급이자의 50% (연 50만원 한도)" }
-        ], 
-        contact: { dept: "산업진흥센터", phone: "031-289-2730", email: "support@kfi.or.kr" }, 
-        documents: ["신청서", "재무제표", "보험료 납입영수증"],
+          { item: "지원내용", value: "IP 관련 대출 이자 2% 지원" },
+          { item: "지원한도", value: "최대 300만원 이내" },
+          { item: "사업예산", value: "총 3.5천만원 한도 (선착순)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "사업자등록증", "대출 관련 증빙서류"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
       { 
         id: 4, 
-        title: "소방산업체 행정 경비 지원", 
+        title: "품질경영 리더기업 육성",
         category: "국내사업",
-        subcategory: "경비",
-        status: "always", 
-        amount: "시험비 면제", 
-        deadline: "상시", 
-        description: "신규 제조업체의 시장진입 장벽을 낮추기 위해 형식승인(정식) 취득에 필요한 시험비를 지원합니다. 기술원 인정 및 검사실적이 1년 이하인 신규 제조업체가 대상입니다.", 
-        target: "기술원 형식승인(인정) 및 제품검사 실적 1년 이하 신규 제조업체",
-        targetTags: ["신규업체", "제조업체"],
+        subcategory: "육성",
+        status: "open",
+        amount: "지원금 100만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "「전문인재 양성사업」 참여 소방용품·장비 제조사를 대상으로 리더기업을 선발합니다. 기존 지원사업 우대 및 경영 안정화 재정지원, 교육 수료 후 지원금 100만원 지급 및 전시회 참가 가점 제공.",
+        target: "소방산업기술원 「전문인재 양성사업」 참여 소방용품·장비 제조사 (형식승인·성능인증·KFI인증·소방장비인증(KFAC)·방염성능검사 해당 업체)",
+        targetTags: ["제조업체", "소방산업체"],
         details: [
-          { item: "시험비", value: "전액 면제" },
-          { item: "지원횟수", value: "업체당 연 1회" }
-        ], 
-        contact: { dept: "인증심사센터", phone: "031-289-2740", email: "cert@kfi.or.kr" }, 
+          { item: "선발방법", value: "「전문인재 양성사업」 신청 시 리더기업 선발" },
+          { item: "지원금", value: "교육 수료 후 100만원 지급" },
+          { item: "추가혜택", value: "기존 지원사업 우대 + 전시회 참가 가점" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
         documents: ["신청서", "사업자등록증"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
       { 
         id: 5, 
-        title: "제17회 대한민국 소방산업대상", 
+        title: "제18회 대한민국 소방산업대상",
         category: "국내사업",
         subcategory: "포상",
-        status: "closed", 
-        amount: "대통령상 등 포상", 
-        deadline: "2025-04-30", 
-        description: "소방산업 발전에 기여한 우수 기업 및 개인을 발굴하여 포상합니다. 기술진흥, 품질경영, 수출진흥, 상생협력 등 다양한 부문에서 시상하며, 대통령상, 국무총리상 등을 수여합니다.", 
-        target: "소방산업 분야 기술혁신 기여 기업 및 개인",
+        status: "open",
+        amount: "행정안전부장관상 등",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "소방산업 발전에 기여한 우수 기업·개인을 발굴하여 포상합니다. 기술·경영 부문(2개 부문 5개 훈격 17개 상)과 제품디자인 부문(1개 부문 3개 훈격 4개 상)으로 구성됩니다. ※ 시상규모 등 세부내용은 추후 변경될 수 있음.",
+        target: "소방산업 발전에 기여한 기업·개인 및 소방제품의 기술응용이 가능한 실용적인 디자인을 출품한 작품",
         targetTags: ["소방산업체", "기술혁신"],
         details: [
-          { item: "대상", value: "대통령상" },
-          { item: "최우수상", value: "국무총리상" },
-          { item: "우수상", value: "장관상" }
-        ], 
-        contact: { dept: "기획조정실", phone: "031-289-2710", email: "award@kfi.or.kr" }, 
-        documents: ["추천서", "실적증빙자료"],
-        applyUrl: "https://www.kfi.or.kr/menu/support"
-      },
-      { 
-        id: 6, 
-        title: "국내외 소방산업 발전 경비지원", 
-        category: "국내사업",
-        subcategory: "경비",
-        status: "open", 
-        amount: "최대 6,000만원", 
-        deadline: "2025-04-30", 
-        description: "개인사업자를 통한 소기업 및 소상공업과 기업탁아 기업 재난안전 소방분야 기술을 가능한 실험도 디자인을 솔루션 개발업무 및 개인 기술연구원입니다.", 
-        target: "소방산업 관련 기업 및 연구기관",
-        targetTags: ["소방산업체", "연구기관"],
-        details: [
-          { item: "지원금액", value: "최대 6,000만원" }
-        ], 
-        contact: { dept: "산업진흥센터", phone: "031-289-2730", email: "support@kfi.or.kr" }, 
-        documents: ["신청서", "사업계획서"],
+          { item: "기술·경영 부문", value: "2개 부문 5개 훈격 17개 상" },
+          { item: "제품디자인 부문", value: "1개 부문 3개 훈격 4개 상" },
+          { item: "주요 시상", value: "행정안전부장관상·소방청장상·한국소방산업기술원장상·한국발명진흥회장상" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["추천서", "실적 증빙서류"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
 
@@ -232,7 +261,7 @@
           { item: "장소", value: "미국 시카고" },
           { item: "지원내용", value: "부스비, 장치비, 통역비" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["참가신청서", "사업자등록증", "수출실적증명서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -252,7 +281,7 @@
           { item: "일정", value: "2025.10.15~17" }, 
           { item: "장소", value: "싱가포르" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["참가신청서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -272,7 +301,7 @@
           { item: "일정", value: "2026.01.12~14" }, 
           { item: "장소", value: "UAE 두바이" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["참가신청서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -292,7 +321,7 @@
           { item: "기업당 최대", value: "3,000만원 (2개 인증)" },
           { item: "지원비율", value: "총 비용의 70%" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["신청서", "견적서", "사업자등록증"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -311,7 +340,7 @@
           { item: "지원내용", value: "항공료, 숙박비, 통역비" },
           { item: "2025년 파견지", value: "멕시코 등" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["참가신청서", "사업자등록증"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -330,7 +359,7 @@
           { item: "연간 한도", value: "500만원" },
           { item: "지원비율", value: "총 비용의 70%" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["마케팅 계획서", "사업자등록증"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -350,7 +379,7 @@
           { item: "온라인", value: "Tradekorea.com" },
           { item: "참가비", value: "무료" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["참가신청서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -369,7 +398,7 @@
           { item: "소형기업", value: "30만원" }, 
           { item: "중형기업", value: "50만원" }
         ], 
-        contact: { dept: "해외사업팀", phone: "031-289-2750", email: "global@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
         documents: ["신청서", "보험가입증명서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -390,7 +419,7 @@
           { item: "정원", value: "25명/기수" },
           { item: "교육비", value: "무료" }
         ], 
-        contact: { dept: "교육센터", phone: "031-289-2760", email: "edu@kfi.or.kr" }, 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "edu@kfi.or.kr" }, 
         documents: ["교육신청서"],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
@@ -398,44 +427,50 @@
       // ===== 정보제공 =====
       { 
         id: 16, 
-        title: "소방산업 통계조사", 
+        title: "소방산업 통계조사",
         category: "정보제공",
-        subcategory: "통계",
-        status: "always", 
-        amount: "무료 정보제공", 
-        deadline: "상시", 
-        description: "국가승인통계(제560018호)로 소방산업 현황을 체계적으로 조사·분석하여 제공합니다. 사업체 수, 종사자 수, 매출액 등 소방산업 전반의 통계정보를 열람하실 수 있습니다.", 
+        subcategory: "통계조사",
+        status: "always",
+        amount: "무료 정보제공",
+        openDate: "2026-01-01",
+        deadline: "상시",
+        description: "국가승인통계(제156010호)로 통계청 소방산업 특수분류체계에 따른 소방산업체의 현황을 매년 1회 정기 조사합니다. 2025년 통계조사 결과 기준일: 2024년 12월 31일.",
         target: "소방산업 관계자 및 일반 국민",
         targetTags: ["정보필요"],
         details: [
-          { item: "사업체수", value: "9,856개 (2023)" }, 
-          { item: "종사자수", value: "약 10만명" },
-          { item: "매출액", value: "19.4조원" }
-        ], 
-        contact: { dept: "정책연구실", phone: "031-289-2720", email: "research@kfi.or.kr" }, 
+          { item: "조사항목", value: "소방산업체 일반현황·인력현황·경영현황·연구개발 현황 등" },
+          { item: "조사대상", value: "소방공사업·소방관리업·소방제조업·소방설계업·소방감리업·소방도매 등" },
+          { item: "조사주기", value: "매년 1회 정기 조사" },
+          { item: "기준일", value: "2024년 12월 31일 (2025년 통계조사 결과)" },
+          { item: "열람방법", value: "한국소방산업기술원 누리집 (www.kfi.or.kr)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "research@kfi.or.kr" },
         documents: [],
         applyUrl: "https://www.kfi.or.kr/menu/support"
       },
       { 
         id: 17, 
-        title: "소방산업 종합 포털시스템", 
+        title: "소방산업 수요조사",
         category: "정보제공",
-        subcategory: "포털",
-        status: "always", 
-        amount: "무료 정보제공", 
-        deadline: "상시", 
-        description: "소방산업 관련 종합정보를 한 곳에서 확인할 수 있는 포털시스템입니다. 지원사업 안내, 인증정보, 업체검색, 통계정보 등 다양한 서비스를 이용하실 수 있습니다.", 
+        subcategory: "수요조사",
+        status: "always",
+        amount: "무료 정보제공",
+        openDate: "2026-01-01",
+        deadline: "상시",
+        description: "차기년도 공공부문(정부부처·공공기관 등) 및 민간부문(종합건설사·소방공사업) 소방 관련 수요 예산을 조사합니다. 2026년 수요조사 결과 기준일: 2025년 12월 31일.",
         target: "소방산업 관계자 및 일반 국민",
         targetTags: ["정보필요"],
         details: [
-          { item: "접속주소", value: "www.kfi.or.kr" },
-          { item: "제공서비스", value: "지원사업, 인증, 통계, 업체검색" }
-        ], 
-        contact: { dept: "정보화팀", phone: "031-289-2700", email: "info@kfi.or.kr" }, 
+          { item: "조사항목", value: "소방장비 구입·소방시설 신규·유지보수 등의 사업 예산" },
+          { item: "조사대상", value: "공공부문(정부부처·공공기관), 민간부문(종합건설사·소방공사업)" },
+          { item: "기준일", value: "2025년 12월 31일 (2026년 수요조사 결과)" },
+          { item: "열람방법", value: "한국소방산업기술원 누리집 (www.kfi.or.kr)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "research@kfi.or.kr" },
         documents: [],
-        applyUrl: "https://www.kfi.or.kr"
+        applyUrl: "https://www.kfi.or.kr/menu/support"
       },
-    ];
+    ]
 
     const defaultExhibitions = [
       { id: 1, name: "NFPA Conference & Expo", location: "미국 시카고", country: "🇺🇸", startDate: "2025-06-16", endDate: "2025-06-18", color: "from-teal-600 to-teal-400" },
@@ -511,9 +546,14 @@
         try {
           const snapshot = await getDocs(collection(db, "programs"));
           if (snapshot.empty) {
+            // ✅ 최초 1회만 실행 - Firestore에 데이터가 한 건이라도 있으면 절대 실행 안 됨
+            // 이후 HTML을 아무리 새로 올려도 Firestore 데이터는 변경되지 않음
             const batch = writeBatch(db);
             defaultPrograms.forEach((program) => batch.set(doc(db, "programs", String(program.id)), program));
             await batch.commit();
+            console.log('[KFI] 초기 데이터 Firestore 적재 완료');
+          } else {
+            console.log('[KFI] Firestore 데이터 존재 - 초기화 건너뜀 (' + snapshot.size + '개)');
           }
           return { success: true };
         } catch (error) { return { success: false }; }
@@ -522,7 +562,13 @@
       subscribePrograms: (callback) => {
         const q = query(collection(db, "programs"), orderBy("id"));
         return onSnapshot(q, (snapshot) => {
-          const programs = []; snapshot.forEach((doc) => programs.push({ docId: doc.id, ...doc.data() })); callback(programs);
+          const programs = [];
+          snapshot.forEach((doc) => programs.push({ docId: doc.id, ...doc.data() }));
+          // Firestore에 데이터 없으면 defaultPrograms 사용
+          callback(programs.length > 0 ? programs : window.defaultPrograms || []);
+        }, (error) => {
+          // Firebase 연결 실패 시 defaultPrograms fallback
+          callback(window.defaultPrograms || []);
         });
       },
 
@@ -723,8 +769,14 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback } = React;
 
-    // 현재 날짜: 2025년 12월 10일 기준
-    const TODAY = new Date('2025-12-10');
+    // 현재 날짜 (한국 시간 기준)
+    const getTodayKST = () => {
+      const now = new Date();
+      // KST = UTC+9, 날짜 비교용으로 시간 제거
+      const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      return new Date(kst.toISOString().slice(0, 10));
+    };
+    const TODAY = getTodayKST();
     
     const calculateDday = (deadline) => {
       if (!deadline || deadline === "상시" || deadline === "수시" || deadline === "연중상시") return null;
@@ -834,6 +886,51 @@
       return messages[errorCode] || '오류가 발생했습니다.'; 
     };
 
+    // === 검색 입력 컴포넌트 (controlled + 엔터/버튼으로만 검색) ===
+    const AppSearchBar = ({ onQueryChange, resetKey }) => {
+      const [val, setVal] = React.useState('');
+
+      React.useEffect(() => {
+        setVal('');
+        onQueryChange('');
+      }, [resetKey]);
+
+      const doSearch = (v) => {
+        onQueryChange((v !== undefined ? v : val).trim());
+      };
+
+      return (
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Icon name="search" className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              enterKeyHint="search"
+              placeholder="검색어 입력 후 엔터"
+              value={val}
+              onChange={e => setVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') doSearch(); }}
+              className="w-full pl-10 pr-10 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {val && (
+              <button type="button"
+                onClick={() => { setVal(''); onQueryChange(''); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button type="button" onClick={() => doSearch()}
+            className="px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 rounded-xl text-white flex-shrink-0">
+            <Icon name="search" className="w-5 h-5" />
+          </button>
+        </div>
+      );
+    };
+
+
     function App() {
       const [firebaseReady, setFirebaseReady] = useState(false);
       const [userType, setUserType] = useState(null); // null | 'general' | 'manufacturer' | 'admin'
@@ -852,7 +949,8 @@
       const [currentPage, setCurrentPage] = useState('home');
       const [selectedProgram, setSelectedProgram] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
-      const [searchInput, setSearchInput] = useState('');
+      const [searchBarKey, setSearchBarKey] = useState(0);
+      const clearSearch = React.useCallback(() => { setSearchQuery(''); setSearchBarKey(k => k+1); }, []);
       const [selectedCategory, setSelectedCategory] = useState('전체');
       const [activeModal, setActiveModal] = useState(null);
       const [reviewModal, setReviewModal] = useState(null);
@@ -867,18 +965,18 @@
       const [chatMessages, setChatMessages] = useState([
         { role: 'bot', text: '안녕하세요! KFI 지원사업 챗봇입니다. 무엇을 도와드릴까요?' }
       ]);
-      const [programsLoading, setProgramsLoading] = useState(true);
-      const [showProgramEditor, setShowProgramEditor] = useState(false);
-      const [editingProgram, setEditingProgram] = useState(null);
+      const [programsLoading, setProgramsLoading] = useState(false);
+      // 사업관리 폼 상태 - App 최상위에서 관리 (탭 전환 시 초기화 방지)
+      const [showProgramForm, setShowProgramForm] = useState(false);
+      const [editProg, setEditProg] = useState(null);
+      const emptyProgForm = { title:'', category:'국내사업', subcategory:'', description:'', amount:'', openDate:'', deadline:'2026-09-30', target:'', applyUrl:'', status:'open' };
+      const [progForm, setProgForm] = useState(emptyProgForm);
+      const [progSaving, setProgSaving] = useState(false);
+      const [adminTab, setAdminTab] = useState('dashboard');
 
       useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
 
-      // 실시간 검색 debounce (개선3)
-      useEffect(() => {
-        if (searchInput === '') { setSearchQuery(''); return; }
-        const timer = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
-        return () => clearTimeout(timer);
-      }, [searchInput]);
+      // 검색 쿼리는 AppSearchBar에서 직접 setSearchQuery 호출
 
       // 관리자 Firebase 인증 상태
       useEffect(() => {
@@ -891,9 +989,17 @@
               setUserProfile(r.data);
               setIsAdmin(true);
               setUserType('admin');
+            } else if (r.success) {
+              // 일반 Firebase 사용자 (관리자 아님) - 무시
+              await window.firebaseAPI.signOut();
             }
           } else {
-            if (isAdmin) { setCurrentUser(null); setUserProfile(null); setIsAdmin(false); setUserType(null); }
+            if (isAdmin) {
+              setCurrentUser(null);
+              setUserProfile(null);
+              setIsAdmin(false);
+              setUserType(null);
+            }
           }
         });
       }, [firebaseReady]);
@@ -906,7 +1012,10 @@
       useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeUsers(setAllUsers); }, [firebaseReady, isAdmin]);
       useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeAllApplications(setAllApplications); }, [firebaseReady, isAdmin]);
       useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeVisitStats(setVisitStats); }, [firebaseReady, isAdmin]);
-      useEffect(() => { if (!firebaseReady || isAdmin) return; return window.firebaseAPI.subscribeUserApplications('anonymous', setUserApplications); }, [firebaseReady, isAdmin]);
+      useEffect(() => { if (!firebaseReady || isAdmin) return; 
+        const uid = getOrCreateDeviceId();
+        return window.firebaseAPI.subscribeUserApplications(uid, setUserApplications); 
+      }, [firebaseReady, isAdmin]);
 
       // 알림 데이터 생성
       useEffect(() => {
@@ -959,8 +1068,9 @@
       
       const submitApplication = async (program) => {
         try {
+          const deviceId = getOrCreateDeviceId();
           const r = await window.firebaseAPI.submitApplication({
-            userId: currentUser?.uid || 'anonymous_' + (userType||'general'),
+            userId: currentUser?.uid || deviceId,
             userEmail: currentUser?.email || userType + '@kfi.user',
             userName: userProfile?.name || (userType === 'manufacturer' ? '제조업체 사용자' : '일반 사용자'),
             userCompany: userProfile?.company || '미등록',
@@ -983,6 +1093,72 @@
         setUserType(null);
         setCurrentPage('home');
         setActiveModal(null);
+      };
+
+      // ===== 사업관리 CRUD 핸들러 (App 레벨 - 탭 전환해도 상태 유지) =====
+      const handleSaveProgram = async () => {
+        if (!progForm.title.trim()) { alert('사업명을 입력하세요.'); return; }
+        setProgSaving(true);
+        try {
+          if (editProg) {
+            // 수정: docId 우선, 없으면 String(id)
+            const docId = editProg.docId || String(editProg.id);
+            const result = await window.firebaseAPI.updateProgram(docId, progForm);
+            if (result.success) {
+              alert('수정되었습니다.');
+            } else {
+              alert('수정 중 오류가 발생했습니다.');
+            }
+          } else {
+            const result = await window.firebaseAPI.addProgram(progForm);
+            if (result.success) {
+              alert('새 사업이 추가되었습니다.');
+            } else {
+              alert('추가 중 오류가 발생했습니다.');
+            }
+          }
+          setShowProgramForm(false);
+          setEditProg(null);
+          setProgForm(emptyProgForm);
+        } catch(e) {
+          alert('저장 중 오류가 발생했습니다.');
+        }
+        setProgSaving(false);
+      };
+
+      const handleEditProg = (p) => {
+        setEditProg(p);
+        setProgForm({
+          title: p.title || '',
+          category: p.category || '국내사업',
+          subcategory: p.subcategory || '',
+          description: p.description || '',
+          amount: p.amount || '',
+          openDate: p.openDate || '',
+          deadline: p.deadline || '2026-09-30',
+          target: p.target || '',
+          applyUrl: p.applyUrl || '',
+          status: p.status || 'open'
+        });
+        setShowProgramForm(true);
+        setAdminTab('programs'); // 사업관리 탭으로 자동 이동
+      };
+
+      const handleDeleteProg = async (p) => {
+        if (!confirm(`"${p.title}"\n\n삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+        const docId = p.docId || String(p.id);
+        const result = await window.firebaseAPI.deleteProgram(docId);
+        if (result.success) {
+          alert('삭제되었습니다.');
+        } else {
+          alert('삭제 중 오류가 발생했습니다.');
+        }
+      };
+
+      const handleCancelProgramForm = () => {
+        setShowProgramForm(false);
+        setEditProg(null);
+        setProgForm(emptyProgForm);
       };
 
       const savePreferences = async () => {
@@ -1013,8 +1189,8 @@
         '해외': '해외 진출 관련 지원사업으로는 해외인증 획득 지원(최대 70%), 해외전시회 참가 지원, 수출상담회 개최 등이 있습니다. 자세한 내용은 지원사업 목록에서 확인해주세요.',
         '신청': '지원사업 신청은 홈 화면에서 원하시는 지원사업을 선택한 후 "신청하기" 버튼을 클릭하시면 됩니다. 필요 서류는 각 사업별 상세 페이지에서 확인하실 수 있습니다.',
         '마감': '마감 임박 지원사업은 홈 화면 "마감 임박" 섹션에서 확인하실 수 있습니다. D-day가 표시되어 마감일까지 남은 일수를 쉽게 확인하실 수 있습니다.',
-        '문의': '문의사항은 산업진흥센터 031-289-2730으로 연락주시거나, support@kfi.or.kr로 이메일을 보내주세요. 평일 09:00~18:00에 상담 가능합니다.',
-        '금융': '금융 지원사업으로는 "소방산업체 금융 경비 지원"이 있습니다. HP보증보험료 50% 지원(연 50만원 한도), 융자금리 실 지급이자의 50% 지원(연 50만원 한도)을 받으실 수 있습니다.',
+        '문의': '문의사항은 산업진흥센터 031-289-0000으로 연락주시거나, support@kfi.or.kr로 이메일을 보내주세요. 평일 09:00~18:00에 상담 가능합니다.',
+        '금융': '금융 지원사업으로는 "소방산업체 금융 경비 지원"(HP보증보험료 50%, 연 50만원 한도)과 "지식재산(IP) 금융 지원사업"(IP 대출 2% 이자 지원, 최대 300만원)이 있습니다.',
         '전시회': '해외전시회 참가 지원사업을 통해 국제 소방전시회 참가비와 부스비를 지원받으실 수 있습니다. 전시회별 공고를 확인해주세요.',
         '자격': '지원 자격은 사업별로 다릅니다. 일반적으로 통계청 산업특수분류에 의한 소방산업 종사자 및 기업(단체)이 대상입니다. 각 사업 상세페이지에서 정확한 자격요건을 확인해주세요.',
         '서류': '일반적으로 지원신청서, 사업자등록증, 관련 증빙서류가 필요합니다. 사업별로 필요 서류가 다르니 상세페이지를 확인해주세요.',
@@ -1303,24 +1479,7 @@
               </div>
             </div>
             {!isAdmin && (
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" className="w-5 h-5" /></div>
-                  <input
-                    id="searchInputField"
-                    type="search"
-                    enterKeyHint="search"
-                    placeholder="지원사업명, 키워드 검색"
-                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={searchInput}
-                    onChange={e => setSearchInput(e.target.value)}
-                    onCompositionEnd={e => setSearchInput(e.target.value)}
-                  />
-                </div>
-                {searchInput && (
-                  <button type="button" onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="px-4 py-3 bg-slate-600 hover:bg-slate-500 rounded-xl text-white text-sm transition">✕</button>
-                )}
-              </div>
+              <AppSearchBar resetKey={searchBarKey} onQueryChange={setSearchQuery} />
             )}
           </div>
         </header>
@@ -1575,7 +1734,7 @@
             {searchQuery ? (
               <div className="flex items-center justify-between">
                 <p className="text-sm text-slate-600"><span className="font-semibold text-blue-600">"{searchQuery}"</span> 검색결과 <span className="font-bold text-slate-900 ml-1">{filteredPrograms.length}건</span></p>
-                <button type="button" onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="flex items-center gap-1 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-xs font-medium text-slate-600">
+                <button type="button" onClick={clearSearch} className="flex items-center gap-1 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-xs font-medium text-slate-600">
                   <Icon name="x" className="w-3 h-3" />초기화
                 </button>
               </div>
@@ -1595,7 +1754,7 @@
                 <div className="text-5xl mb-4">🔍</div>
                 <p className="text-slate-600 font-medium mb-2">검색 결과가 없습니다</p>
                 <p className="text-sm text-slate-400 mb-4">다른 키워드로 검색해 보세요</p>
-                <button type="button" onClick={() => { setSearchInput(''); setSearchQuery(''); setSelectedCategory('전체'); }} className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium">전체 목록 보기</button>
+                <button type="button" onClick={() => { clearSearch(); setSelectedCategory('전체'); }} className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium">전체 목록 보기</button>
               </div>
             ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1651,7 +1810,7 @@
                   <div className="text-5xl mb-4">📋</div>
                   <p className="font-semibold text-slate-700 mb-1">신청 내역이 없습니다</p>
                   <p className="text-sm text-slate-400 mb-5">지원사업을 찾아 신청해보세요</p>
-                  <button onClick={() => setCurrentPage('list')} className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-semibold">지원사업 둘러보기 →</button>
+                  <button onClick={() => setCurrentPage('home')} className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-semibold">지원사업 둘러보기 →</button>
                 </div>
               ) : (
                 filteredUserApps.map(app => (
@@ -1664,6 +1823,155 @@
                 ))
               )}
             </div>
+          </div>
+        );
+      };
+
+      // ===== 관리자 대시보드 =====
+      const AdminDashboard = () => {
+        const totalVisits = visitStats.reduce((s,d) => s+(d.total||0), 0);
+        const totalUnique = visitStats.reduce((s,d) => s+(d.unique||0), 0);
+        const todayStats = visitStats[0] || {};
+
+        return (
+          <div className="pb-24 animate-fade-in">
+            <div className="flex bg-white border-b">
+              {[{id:'dashboard',label:'📊 대시보드'},{id:'programs',label:'📝 사업관리'}].map(t => (
+                <button key={t.id} onClick={() => setAdminTab(t.id)} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${adminTab===t.id ? 'border-slate-800 text-slate-900' : 'border-transparent text-slate-400'}`}>{t.label}</button>
+              ))}
+            </div>
+
+            {adminTab === 'dashboard' ? (
+              <div className="px-4 py-5">
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="bg-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-slate-500 mb-1">가입 회원</p>
+                    <p className="text-2xl font-bold">{allUsers.length}명</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-slate-500 mb-1">전체 신청</p>
+                    <p className="text-2xl font-bold">{allApplications.length}건</p>
+                    <p className="text-xs text-amber-600">대기 {allApplications.filter(a=>a.status==='submitted').length}건</p>
+                  </div>
+                  <div className="bg-blue-50 p-4 rounded-2xl shadow-sm border border-blue-100">
+                    <p className="text-xs text-blue-600 mb-1">📈 누적 방문</p>
+                    <p className="text-2xl font-bold text-blue-700">{totalVisits.toLocaleString()}회</p>
+                    <p className="text-xs text-blue-400">순 방문자 {totalUnique}명</p>
+                  </div>
+                  <div className="bg-emerald-50 p-4 rounded-2xl shadow-sm border border-emerald-100">
+                    <p className="text-xs text-emerald-600 mb-1">📅 오늘 방문</p>
+                    <p className="text-2xl font-bold text-emerald-700">{todayStats.total||0}회</p>
+                    <p className="text-xs text-slate-500">순 {todayStats.unique||0}명 · 일반 {todayStats.general||0} · 제조 {todayStats.manufacturer||0}</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+                  <h3 className="font-bold mb-4">📈 최근 방문 현황</h3>
+                  {visitStats.length === 0 ? (
+                    <p className="text-center py-4 text-slate-400 text-sm">방문 데이터가 없습니다.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {visitStats.slice(0,7).map(d => (
+                        <div key={d.id} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 w-20 flex-shrink-0">{d.date}</span>
+                          <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden relative">
+                            <div className="h-full bg-blue-500 rounded-full" style={{width:`${Math.min((d.total||0)/Math.max(...visitStats.map(s=>s.total||1))*100,100)}%`}} />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-700">{d.total||0}회</span>
+                          </div>
+                          <span className="text-xs text-slate-400 w-14 text-right flex-shrink-0">순 {d.unique||0}명</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+                  <h3 className="font-bold mb-4">👥 가입 회원 현황</h3>
+                  {allUsers.length === 0 ? <p className="text-center py-4 text-slate-400 text-sm">가입 회원이 없습니다.</p> : (
+                    <div className="space-y-3 max-h-60 overflow-y-auto">
+                      {allUsers.map(u => (
+                        <div key={u.uid} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
+                          <div><p className="font-medium text-sm">{u.name}</p><p className="text-xs text-slate-400">{u.company||'미등록'} · {u.email}</p></div>
+                          <span className="text-xs text-slate-400">{u.createdAt ? new Date(u.createdAt).toLocaleDateString('ko-KR') : '-'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <h3 className="font-bold mb-4">📝 최근 신청</h3>
+                  {allApplications.length === 0 ? <p className="text-center py-4 text-slate-400 text-sm">신청 내역이 없습니다.</p> : (
+                    allApplications.slice(0,5).map(app => (
+                      <div key={app.docId} className="flex justify-between py-2 border-b last:border-0">
+                        <div><p className="font-medium text-sm">{app.userCompany}</p><p className="text-xs text-slate-400">{app.programTitle}</p></div>
+                        <span className={`px-2 py-1 rounded text-xs font-bold self-start ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-5">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold">지원사업 관리 ({programs.length}개)</h3>
+                  <button onClick={() => { setEditProg(null); setProgForm(emptyProgForm); setShowProgramForm(true); }} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-xl">+ 추가</button>
+                </div>
+
+                {showProgramForm && (
+                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
+                    <h4 className="font-bold mb-3 text-slate-800">{editProg ? `✏️ "${editProg.title}" 수정` : '➕ 신규 사업 추가'}</h4>
+                    <div className="space-y-2">
+                      <input placeholder="사업명 *" value={progForm.title} onChange={e=>setProgForm({...progForm,title:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <select value={progForm.category} onChange={e=>setProgForm({...progForm,category:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <option>국내사업</option><option>해외사업</option><option>정보제공</option>
+                      </select>
+                      <input placeholder="세부분류 (예: 특허, 해외인증)" value={progForm.subcategory} onChange={e=>setProgForm({...progForm,subcategory:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input placeholder="지원금액 (예: 최대 500만원)" value={progForm.amount} onChange={e=>setProgForm({...progForm,amount:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input placeholder="공고 시작일 (예: 2026-01-01)" value={progForm.openDate||''} onChange={e=>setProgForm({...progForm,openDate:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input placeholder="접수 마감일 (예: 2026-09-30 또는 상시)" value={progForm.deadline} onChange={e=>setProgForm({...progForm,deadline:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <textarea placeholder="사업 설명" value={progForm.description} onChange={e=>setProgForm({...progForm,description:e.target.value})} rows="3" className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input placeholder="지원대상" value={progForm.target} onChange={e=>setProgForm({...progForm,target:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input placeholder="신청 URL (https://...)" value={progForm.applyUrl} onChange={e=>setProgForm({...progForm,applyUrl:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <select value={progForm.status} onChange={e=>setProgForm({...progForm,status:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <option value="open">접수중</option>
+                        <option value="always">상시</option>
+                        <option value="upcoming">접수예정</option>
+                        <option value="closed">마감</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <button onClick={handleCancelProgramForm} className="flex-1 py-3 rounded-xl bg-slate-200 text-sm font-semibold text-slate-700">취소</button>
+                      <button onClick={handleSaveProgram} disabled={progSaving} className="flex-1 py-3 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
+                        {progSaving ? '저장중...' : editProg ? '수정 저장' : '추가 저장'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {programs.map(p => (
+                    <div key={p.docId||p.id} className="bg-white rounded-xl p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm">{p.title}</p>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getCategoryColor(p.category)}`}>{p.category}</span>
+                            {p.subcategory && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{p.subcategory}</span>}
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getStatusBadge(p.status).class}`}>{getStatusBadge(p.status).text}</span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">{p.openDate ? `공고: ${p.openDate} ~ ` : ""}{p.deadline} · {p.amount}</p>
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button onClick={() => handleEditProg(p)} className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold">수정</button>
+                          <button onClick={() => handleDeleteProg(p)} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-semibold">삭제</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       };
@@ -2027,7 +2335,7 @@
           ), 
           help: (
             <div className="space-y-4">
-              <div className="bg-blue-50 rounded-xl p-4"><p className="font-semibold">📞 전화문의</p><p className="text-lg font-bold text-blue-600">031-289-2700</p><p className="text-xs text-slate-500 mt-1">평일 09:00~18:00</p></div>
+              <div className="bg-blue-50 rounded-xl p-4"><p className="font-semibold">📞 전화문의</p><p className="text-lg font-bold text-blue-600">031-289-0000</p><p className="text-xs text-slate-500 mt-1">평일 09:00~18:00</p></div>
               <div className="bg-slate-50 rounded-xl p-4"><p className="font-semibold">📧 이메일</p><p>support@kfi.or.kr</p></div>
               <a href="https://kfi.or.kr" target="_blank" rel="noopener noreferrer" className="block bg-slate-800 text-white rounded-xl p-4 text-center font-semibold">기술원 홈페이지 바로가기</a>
             </div>
