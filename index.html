@@ -24,7 +24,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260310-005'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260310-006'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -112,11 +112,11 @@
     document.head.appendChild(link);
   </script>
   
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, collection, getDocs, addDoc, query, orderBy, where, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
-
+  <!-- Firebase compat SDK (모듈 방식 대신 compat 사용: file://, GitHub Pages 모두 호환) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script>
     const firebaseConfig = {
       apiKey: "AIzaSyCHJcVV4gaHKAA8YeJJ56zEoREXqCizrW4",
       authDomain: "test-kfi.firebaseapp.com",
@@ -126,9 +126,9 @@
       appId: "1:30541110364:web:d6be094c192e146d891a99"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
     // HWP 리플릿 기준 지원사업 데이터
     const defaultPrograms = [
@@ -486,9 +486,9 @@
       
       signUp: async (email, password, userData) => {
         try {
-          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          const userCredential = await auth.createUserWithEmailAndPassword(email, password);
           const user = userCredential.user;
-          await setDoc(doc(db, "users", user.uid), {
+          await db.collection("users").doc(user.uid).set({
             ...userData, email, uid: user.uid, bookmarks: [], preferences: {},
             createdAt: new Date().toISOString(),
             isAdmin: email === 'admin@kfi.or.kr'
@@ -499,12 +499,12 @@
 
       signIn: async (email, password) => {
         try {
-          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          const userCredential = await auth.signInWithEmailAndPassword(email, password);
           return { success: true, user: userCredential.user };
         } catch (error) { return { success: false, error: error.code }; }
       },
 
-      signOut: async () => { try { await signOut(auth); window._testUser = null; window._testUserData = null; window._isTestAdmin = null; return { success: true }; } catch (error) { return { success: false }; } },
+      signOut: async () => { try { await auth.signOut(); window._testUser = null; window._testUserData = null; window._isTestAdmin = null; return { success: true }; } catch (error) { return { success: false }; } },
       
       setTestUser: (testUser, testUserData, isAdmin) => {
         window._testUser = testUser;
@@ -513,43 +513,42 @@
         window.dispatchEvent(new CustomEvent('testUserLogin'));
       },
       
-      onAuthChange: (callback) => onAuthStateChanged(auth, callback),
+      onAuthChange: (callback) => auth.onAuthStateChanged(callback),
 
       getUserProfile: async (uid) => {
         try {
-          const docSnap = await getDoc(doc(db, "users", uid));
-          if (docSnap.exists()) return { success: true, data: docSnap.data() };
+          const docSnap = await db.collection("users").doc(uid).get();
+          if (docSnap.exists) return { success: true, data: docSnap.data() };
           return { success: false };
         } catch (error) { return { success: false }; }
       },
 
       updateUserProfile: async (uid, data) => {
         try {
-          await updateDoc(doc(db, "users", uid), data);
+          await db.collection("users").doc(uid).update(data);
           return { success: true };
         } catch (error) { return { success: false }; }
       },
 
       subscribeUsers: (callback) => {
-        const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("users").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
           const users = []; snapshot.forEach((doc) => users.push({ id: doc.id, ...doc.data() })); callback(users);
         });
       },
 
       updateBookmarks: async (uid, bookmarks) => {
-        try { await updateDoc(doc(db, "users", uid), { bookmarks }); return { success: true }; }
+        try { await db.collection("users").doc(uid).update({ bookmarks }); return { success: true }; }
         catch (error) { return { success: false }; }
       },
 
       initializePrograms: async () => {
         try {
-          const snapshot = await getDocs(collection(db, "programs"));
+          const snapshot = await db.collection("programs").get();
           if (snapshot.empty) {
             // ✅ 최초 1회만 실행 - Firestore에 데이터가 한 건이라도 있으면 절대 실행 안 됨
-            // 이후 HTML을 아무리 새로 올려도 Firestore 데이터는 변경되지 않음
-            const batch = writeBatch(db);
-            defaultPrograms.forEach((program) => batch.set(doc(db, "programs", String(program.id)), program));
+            const batch = db.batch();
+            defaultPrograms.forEach((program) => batch.set(db.collection("programs").doc(String(program.id)), program));
             await batch.commit();
             console.log('[KFI] 초기 데이터 Firestore 적재 완료');
           } else {
@@ -560,21 +559,19 @@
       },
 
       subscribePrograms: (callback) => {
-        const q = query(collection(db, "programs"), orderBy("id"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("programs").orderBy("id");
+        return q.onSnapshot((snapshot) => {
           const programs = [];
           snapshot.forEach((doc) => programs.push({ docId: doc.id, ...doc.data() }));
-          // Firestore에 데이터 없으면 defaultPrograms 사용
           callback(programs.length > 0 ? programs : window.defaultPrograms || []);
         }, (error) => {
-          // Firebase 연결 실패 시 defaultPrograms fallback
           callback(window.defaultPrograms || []);
         });
       },
 
       submitApplication: async (application) => {
         try {
-          const docRef = await addDoc(collection(db, "applications"), {
+          const docRef = await db.collection("applications").add({
             ...application, status: "submitted", step: 1,
             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
           });
@@ -586,29 +583,29 @@
       },
 
       subscribeUserApplications: (uid, callback) => {
-        const q = query(collection(db, "applications"), where("userId", "==", uid), orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("applications").where("userId", "==", uid).orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
           const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
         });
       },
 
       subscribeAllApplications: (callback) => {
-        const q = query(collection(db, "applications"), orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("applications").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
           const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
         });
       },
 
       updateApplicationStatus: async (docId, status, step, note = '') => {
         try {
-          await updateDoc(doc(db, "applications", docId), { status, step, reviewNote: note, updatedAt: new Date().toISOString() });
+          await db.collection("applications").doc(docId).update({ status, step, reviewNote: note, updatedAt: new Date().toISOString() });
           return { success: true };
         } catch (error) { return { success: false }; }
       },
 
       subscribeExhibitions: (callback) => {
-        const q = query(collection(db, "exhibitions"), orderBy("startDate"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("exhibitions").orderBy("startDate");
+        return q.onSnapshot((snapshot) => {
           const exhibitions = []; snapshot.forEach((doc) => exhibitions.push({ docId: doc.id, ...doc.data() })); callback(exhibitions);
         }, (error) => {
           callback(defaultExhibitions);
@@ -617,10 +614,10 @@
 
       initializeExhibitions: async () => {
         try {
-          const snapshot = await getDocs(collection(db, "exhibitions"));
+          const snapshot = await db.collection("exhibitions").get();
           if (snapshot.empty) {
-            const batch = writeBatch(db);
-            defaultExhibitions.forEach((ex) => batch.set(doc(db, "exhibitions", String(ex.id)), ex));
+            const batch = db.batch();
+            defaultExhibitions.forEach((ex) => batch.set(db.collection("exhibitions").doc(String(ex.id)), ex));
             await batch.commit();
           }
           return { success: true };
@@ -631,25 +628,22 @@
       logVisit: async (userType, deviceId) => {
         try {
           const today = new Date().toISOString().slice(0, 10);
-          // 오늘 같은 deviceId가 이미 있는지 확인 (순 방문자 중복 방지)
-          const statRef = doc(db, "visitStats", today);
-          const statSnap = await getDoc(statRef);
+          const statRef = db.collection("visitStats").doc(today);
+          const statSnap = await statRef.get();
           let isUniqueToday = true;
-          if (statSnap.exists()) {
+          if (statSnap.exists) {
             const devices = statSnap.data().devices || [];
             isUniqueToday = !devices.includes(deviceId);
           }
 
-          // 전체 방문 로그 기록 (항상)
-          await addDoc(collection(db, "visits"), {
+          await db.collection("visits").add({
             userType, deviceId,
             visitedAt: new Date().toISOString(),
             date: today,
             isUnique: isUniqueToday
           });
 
-          // 일별 통계 업데이트
-          if (statSnap.exists()) {
+          if (statSnap.exists) {
             const d = statSnap.data();
             const updateData = {
               total: (d.total || 0) + 1,
@@ -661,9 +655,9 @@
               updateData[`unique_${userType}`] = (d[`unique_${userType}`] || 0) + 1;
               updateData.devices = [...(d.devices || []), deviceId];
             }
-            await updateDoc(statRef, updateData);
+            await statRef.update(updateData);
           } else {
-            await setDoc(statRef, {
+            await statRef.set({
               date: today, total: 1, unique: 1,
               [userType]: 1, [`unique_${userType}`]: 1,
               devices: [deviceId],
@@ -674,8 +668,8 @@
       },
 
       subscribeVisitStats: (callback) => {
-        const q = query(collection(db, "visitStats"), orderBy("date", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("visitStats").orderBy("date", "desc");
+        return q.onSnapshot((snapshot) => {
           const stats = []; snapshot.forEach((doc) => stats.push({ id: doc.id, ...doc.data() })); callback(stats);
         }, () => callback([]));
       },
@@ -684,27 +678,27 @@
       addProgram: async (program) => {
         try {
           const newId = Date.now();
-          const docRef = doc(db, "programs", String(newId));
-          await setDoc(docRef, { ...program, id: newId, createdAt: new Date().toISOString() });
+          const docRef = db.collection("programs").doc(String(newId));
+          await docRef.set({ ...program, id: newId, createdAt: new Date().toISOString() });
           return { success: true, id: newId };
         } catch(e) { return { success: false, error: e.message }; }
       },
       updateProgram: async (docId, data) => {
         try {
-          await updateDoc(doc(db, "programs", docId), { ...data, updatedAt: new Date().toISOString() });
+          await db.collection("programs").doc(docId).update({ ...data, updatedAt: new Date().toISOString() });
           return { success: true };
         } catch(e) { return { success: false }; }
       },
       deleteProgram: async (docId) => {
         try {
-          await deleteDoc(doc(db, "programs", docId));
+          await db.collection("programs").doc(docId).delete();
           return { success: true };
         } catch(e) { return { success: false }; }
       },
 
       addNotification: async (notification) => {
         try {
-          await addDoc(collection(db, "notifications"), {
+          await db.collection("notifications").add({
             ...notification,
             createdAt: new Date().toISOString(),
             read: false
@@ -714,15 +708,15 @@
       },
 
       subscribeNotifications: (uid, callback) => {
-        const q = query(collection(db, "notifications"), where("userId", "==", uid), orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("notifications").where("userId", "==", uid).orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
           const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
         }, () => callback([]));
       },
 
       subscribeAllNotifications: (callback) => {
-        const q = query(collection(db, "notifications"), orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        const q = db.collection("notifications").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
           const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
         }, () => callback([]));
       },
@@ -928,6 +922,7 @@
           </button>
         </div>
       );
+    };  // ← AppSearchBar 닫기 (누락된 괄호 복구)
 
     // ── ProgramEditForm: 독립 컴포넌트 (로컬 state → 타이핑 버그 없음) ──
     const ProgramEditForm = ({ initial, onSave, onCancel }) => {
