@@ -24,7 +24,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260310-004'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260310-005'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -928,8 +928,103 @@
           </button>
         </div>
       );
-    };
 
+    // ── ProgramEditForm: 독립 컴포넌트 (로컬 state → 타이핑 버그 없음) ──
+    const ProgramEditForm = ({ initial, onSave, onCancel }) => {
+      const inp = (field, fallback='') => initial ? (initial[field] ?? fallback) : fallback;
+
+      const [title,       setTitle]       = useState(inp('title'));
+      const [category,    setCategory]    = useState(inp('category','국내사업'));
+      const [subcategory, setSubcategory] = useState(inp('subcategory'));
+      const [status,      setStatus]      = useState(inp('status','open'));
+      const [amount,      setAmount]      = useState(inp('amount'));
+      const [openDate,    setOpenDate]    = useState(inp('openDate'));
+      const [deadline,    setDeadline]    = useState(inp('deadline','2026-09-30'));
+      const [description, setDescription]= useState(inp('description'));
+      const [target,      setTarget]      = useState(inp('target'));
+      const [applyUrl,    setApplyUrl]    = useState(inp('applyUrl'));
+      const [contactDept, setContactDept] = useState(inp('contact','')?.dept ?? '산업진흥센터');
+      const [contactPhone,setContactPhone]= useState(inp('contact','')?.phone ?? '031-289-0000');
+      const [contactEmail,setContactEmail]= useState(inp('contact','')?.email ?? '');
+      const [details,     setDetails]     = useState(initial?.details?.length ? initial.details : [{ item:'', value:'' }]);
+      const [documents,   setDocuments]   = useState(initial?.documents?.length ? initial.documents : ['']);
+      const [saving,      setSaving]      = useState(false);
+
+      const ic = 'w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400';
+
+      const handleSave = async () => {
+        const data = {
+          title, category, subcategory, status, amount, openDate, deadline,
+          description, target, applyUrl,
+          contact: { dept: contactDept, phone: contactPhone, email: contactEmail },
+          details: details.filter(d => d.item.trim() || d.value.trim()),
+          documents: documents.filter(d => d.trim()),
+        };
+        setSaving(true);
+        await onSave(data);
+        setSaving(false);
+      };
+
+      return (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
+          <h4 className="font-bold mb-3 text-slate-800">{initial ? `✏️ "${initial.title}" 수정` : '➕ 신규 사업 추가'}</h4>
+          <div className="space-y-2">
+            <p className="text-xs font-bold text-slate-500 mt-2">기본 정보</p>
+            <input placeholder="사업명 *" value={title} onChange={e=>setTitle(e.target.value)} className={ic} />
+            <select value={category} onChange={e=>setCategory(e.target.value)} className={ic}>
+              <option>국내사업</option><option>해외사업</option><option>정보제공</option>
+            </select>
+            <input placeholder="세부분류 (예: 특허, 해외인증)" value={subcategory} onChange={e=>setSubcategory(e.target.value)} className={ic} />
+            <select value={status} onChange={e=>setStatus(e.target.value)} className={ic}>
+              <option value="open">접수중</option>
+              <option value="always">상시</option>
+              <option value="upcoming">접수예정</option>
+              <option value="closed">마감</option>
+            </select>
+            <input placeholder="공고 시작일 (예: 2026-01-01)" value={openDate} onChange={e=>setOpenDate(e.target.value)} className={ic} />
+            <input placeholder="접수 마감일 (예: 2026-09-30 또는 상시)" value={deadline} onChange={e=>setDeadline(e.target.value)} className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">지원 내용</p>
+            <input placeholder="지원금액 (예: 최대 500만원)" value={amount} onChange={e=>setAmount(e.target.value)} className={ic} />
+            <textarea placeholder="사업 설명" value={description} onChange={e=>setDescription(e.target.value)} rows="3" className={ic} />
+            <textarea placeholder="지원대상" value={target} onChange={e=>setTarget(e.target.value)} rows="2" className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">지원 상세 항목 (항목명 / 내용)</p>
+            {details.map((d, i) => (
+              <div key={i} className="flex gap-1">
+                <input placeholder="항목명" value={d.item} onChange={e=>{ const n=[...details]; n[i]={...n[i],item:e.target.value}; setDetails(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <input placeholder="내용" value={d.value} onChange={e=>{ const n=[...details]; n[i]={...n[i],value:e.target.value}; setDetails(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <button type="button" onClick={()=>setDetails(details.filter((_,j)=>j!==i))} className="px-2 text-red-400 text-lg">×</button>
+              </div>
+            ))}
+            <button type="button" onClick={()=>setDetails([...details,{item:'',value:''}])} className="text-xs text-blue-600 font-semibold">+ 항목 추가</button>
+
+            <p className="text-xs font-bold text-slate-500 mt-2">제출 서류</p>
+            {documents.map((d, i) => (
+              <div key={i} className="flex gap-1">
+                <input placeholder="서류명" value={d} onChange={e=>{ const n=[...documents]; n[i]=e.target.value; setDocuments(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <button type="button" onClick={()=>setDocuments(documents.filter((_,j)=>j!==i))} className="px-2 text-red-400 text-lg">×</button>
+              </div>
+            ))}
+            <button type="button" onClick={()=>setDocuments([...documents,''])} className="text-xs text-blue-600 font-semibold">+ 서류 추가</button>
+
+            <p className="text-xs font-bold text-slate-500 mt-2">문의처</p>
+            <input placeholder="부서명 (예: 산업진흥센터)" value={contactDept} onChange={e=>setContactDept(e.target.value)} className={ic} />
+            <input placeholder="전화번호 (예: 031-289-0000)" value={contactPhone} onChange={e=>setContactPhone(e.target.value)} className={ic} />
+            <input placeholder="이메일" value={contactEmail} onChange={e=>setContactEmail(e.target.value)} className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">신청 URL</p>
+            <input placeholder="신청 URL (https://...)" value={applyUrl} onChange={e=>setApplyUrl(e.target.value)} className={ic} />
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl bg-slate-200 text-sm font-semibold text-slate-700">취소</button>
+            <button type="button" onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
+              {saving ? '저장중...' : initial ? '수정 저장' : '추가 저장'}
+            </button>
+          </div>
+        </div>
+      );
+    };
 
     function App() {
       const [firebaseReady, setFirebaseReady] = useState(false);
@@ -969,9 +1064,6 @@
       // 사업관리 폼 상태 - App 최상위에서 관리 (탭 전환 시 초기화 방지)
       const [showProgramForm, setShowProgramForm] = useState(false);
       const [editProg, setEditProg] = useState(null);
-      const emptyProgForm = { title:'', category:'국내사업', subcategory:'', description:'', amount:'', openDate:'', deadline:'2026-09-30', target:'', applyUrl:'', status:'open' };
-      const [progForm, setProgForm] = useState(emptyProgForm);
-      const [progSaving, setProgSaving] = useState(false);
       const [adminTab, setAdminTab] = useState('dashboard');
 
       useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
@@ -983,23 +1075,18 @@
         if (!firebaseReady) return;
         return window.firebaseAPI.onAuthChange(async (user) => {
           if (user) {
+            // Firebase Auth 로그인 성공 = 관리자 (관리자 계정만 등록 전제)
             const r = await window.firebaseAPI.getUserProfile(user.uid);
-            if (r.success && r.data.isAdmin) {
-              setCurrentUser(user);
-              setUserProfile(r.data);
-              setIsAdmin(true);
-              setUserType('admin');
-            } else if (r.success) {
-              // 일반 Firebase 사용자 (관리자 아님) - 무시
-              await window.firebaseAPI.signOut();
-            }
+            const profileData = (r.success && r.data) ? r.data : { uid: user.uid, name: '관리자', company: 'KFI', isAdmin: true };
+            setCurrentUser(user);
+            setUserProfile(profileData);
+            setIsAdmin(true);
+            setUserType('admin');
           } else {
-            if (isAdmin) {
-              setCurrentUser(null);
-              setUserProfile(null);
-              setIsAdmin(false);
-              setUserType(null);
-            }
+            setCurrentUser(null);
+            setUserProfile(null);
+            setIsAdmin(false);
+            if (isAdmin) setUserType(null);
           }
         });
       }, [firebaseReady]);
@@ -1096,52 +1183,30 @@
       };
 
       // ===== 사업관리 CRUD 핸들러 (App 레벨 - 탭 전환해도 상태 유지) =====
-      const handleSaveProgram = async () => {
-        if (!progForm.title.trim()) { alert('사업명을 입력하세요.'); return; }
-        setProgSaving(true);
+      const handleSaveProgram = async (data) => {
+        if (!data.title.trim()) { alert('사업명을 입력하세요.'); return; }
         try {
           if (editProg) {
-            // 수정: docId 우선, 없으면 String(id)
             const docId = editProg.docId || String(editProg.id);
-            const result = await window.firebaseAPI.updateProgram(docId, progForm);
-            if (result.success) {
-              alert('수정되었습니다.');
-            } else {
-              alert('수정 중 오류가 발생했습니다.');
-            }
+            const result = await window.firebaseAPI.updateProgram(docId, data);
+            if (result.success) { alert('수정되었습니다.'); }
+            else { alert('수정 중 오류가 발생했습니다.'); return; }
           } else {
-            const result = await window.firebaseAPI.addProgram(progForm);
-            if (result.success) {
-              alert('새 사업이 추가되었습니다.');
-            } else {
-              alert('추가 중 오류가 발생했습니다.');
-            }
+            const result = await window.firebaseAPI.addProgram(data);
+            if (result.success) { alert('새 사업이 추가되었습니다.'); }
+            else { alert('추가 중 오류가 발생했습니다.'); return; }
           }
           setShowProgramForm(false);
           setEditProg(null);
-          setProgForm(emptyProgForm);
         } catch(e) {
           alert('저장 중 오류가 발생했습니다.');
         }
-        setProgSaving(false);
       };
 
       const handleEditProg = (p) => {
         setEditProg(p);
-        setProgForm({
-          title: p.title || '',
-          category: p.category || '국내사업',
-          subcategory: p.subcategory || '',
-          description: p.description || '',
-          amount: p.amount || '',
-          openDate: p.openDate || '',
-          deadline: p.deadline || '2026-09-30',
-          target: p.target || '',
-          applyUrl: p.applyUrl || '',
-          status: p.status || 'open'
-        });
         setShowProgramForm(true);
-        setAdminTab('programs'); // 사업관리 탭으로 자동 이동
+        setAdminTab('programs');
       };
 
       const handleDeleteProg = async (p) => {
@@ -1158,7 +1223,6 @@
       const handleCancelProgramForm = () => {
         setShowProgramForm(false);
         setEditProg(null);
-        setProgForm(emptyProgForm);
       };
 
       const savePreferences = async () => {
@@ -1358,7 +1422,7 @@
                   </div>
                   {adminErr && <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-4 text-sm text-red-200">{adminErr}</div>}
                   <div className="space-y-3">
-                    <input type="email" placeholder="이메일" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
+                    <input type="text" placeholder="이메일 (테스트: test)" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
                     <input type="password" placeholder="비밀번호" value={adminPw} onChange={e => setAdminPw(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAdminLogin()} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
                   </div>
                   <button onClick={handleAdminLogin} disabled={adminLoading} className="w-full mt-4 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition disabled:opacity-50">
@@ -1528,7 +1592,7 @@
           <div className="flex justify-around py-1 pb-5 safe-bottom max-w-lg mx-auto">
             {[
               { id: 'home', icon: 'home', label: '지원사업' },
-              ...(isAdmin ? [{ id: 'status', icon: 'check', label: '접수관리' }] : []),
+
               { id: 'calendar', icon: 'calendar', label: '일정' },
               { id: 'mypage', icon: 'user', label: '마이' }
             ].map(item => {
@@ -1851,7 +1915,7 @@
                   <div className="bg-white p-4 rounded-2xl shadow-sm">
                     <p className="text-xs text-slate-500 mb-1">전체 신청</p>
                     <p className="text-2xl font-bold">{allApplications.length}건</p>
-                    <p className="text-xs text-amber-600">대기 {allApplications.filter(a=>a.status==='submitted').length}건</p>
+
                   </div>
                   <div className="bg-blue-50 p-4 rounded-2xl shadow-sm border border-blue-100">
                     <p className="text-xs text-blue-600 mb-1">📈 누적 방문</p>
@@ -1899,54 +1963,22 @@
                   )}
                 </div>
 
-                <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <h3 className="font-bold mb-4">📝 최근 신청</h3>
-                  {allApplications.length === 0 ? <p className="text-center py-4 text-slate-400 text-sm">신청 내역이 없습니다.</p> : (
-                    allApplications.slice(0,5).map(app => (
-                      <div key={app.docId} className="flex justify-between py-2 border-b last:border-0">
-                        <div><p className="font-medium text-sm">{app.userCompany}</p><p className="text-xs text-slate-400">{app.programTitle}</p></div>
-                        <span className={`px-2 py-1 rounded text-xs font-bold self-start ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
+
               </div>
             ) : (
               <div className="px-4 py-5">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold">지원사업 관리 ({programs.length}개)</h3>
-                  <button onClick={() => { setEditProg(null); setProgForm(emptyProgForm); setShowProgramForm(true); }} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-xl">+ 추가</button>
+                  <button onClick={() => { setEditProg(null); setShowProgramForm(true); }} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-xl">+ 추가</button>
                 </div>
 
                 {showProgramForm && (
-                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
-                    <h4 className="font-bold mb-3 text-slate-800">{editProg ? `✏️ "${editProg.title}" 수정` : '➕ 신규 사업 추가'}</h4>
-                    <div className="space-y-2">
-                      <input placeholder="사업명 *" value={progForm.title} onChange={e=>setProgForm({...progForm,title:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <select value={progForm.category} onChange={e=>setProgForm({...progForm,category:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-                        <option>국내사업</option><option>해외사업</option><option>정보제공</option>
-                      </select>
-                      <input placeholder="세부분류 (예: 특허, 해외인증)" value={progForm.subcategory} onChange={e=>setProgForm({...progForm,subcategory:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <input placeholder="지원금액 (예: 최대 500만원)" value={progForm.amount} onChange={e=>setProgForm({...progForm,amount:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <input placeholder="공고 시작일 (예: 2026-01-01)" value={progForm.openDate||''} onChange={e=>setProgForm({...progForm,openDate:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <input placeholder="접수 마감일 (예: 2026-09-30 또는 상시)" value={progForm.deadline} onChange={e=>setProgForm({...progForm,deadline:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <textarea placeholder="사업 설명" value={progForm.description} onChange={e=>setProgForm({...progForm,description:e.target.value})} rows="3" className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <input placeholder="지원대상" value={progForm.target} onChange={e=>setProgForm({...progForm,target:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <input placeholder="신청 URL (https://...)" value={progForm.applyUrl} onChange={e=>setProgForm({...progForm,applyUrl:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <select value={progForm.status} onChange={e=>setProgForm({...progForm,status:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-                        <option value="open">접수중</option>
-                        <option value="always">상시</option>
-                        <option value="upcoming">접수예정</option>
-                        <option value="closed">마감</option>
-                      </select>
-                    </div>
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={handleCancelProgramForm} className="flex-1 py-3 rounded-xl bg-slate-200 text-sm font-semibold text-slate-700">취소</button>
-                      <button onClick={handleSaveProgram} disabled={progSaving} className="flex-1 py-3 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
-                        {progSaving ? '저장중...' : editProg ? '수정 저장' : '추가 저장'}
-                      </button>
-                    </div>
-                  </div>
+                  <ProgramEditForm
+                    key={editProg ? (editProg.docId || editProg.id) : 'new'}
+                    initial={editProg}
+                    onSave={handleSaveProgram}
+                    onCancel={handleCancelProgramForm}
+                  />
                 )}
 
                 <div className="space-y-2">
@@ -2061,34 +2093,14 @@
 
       const MyPage = () => (
         <div className="pb-24 px-4 py-4 animate-fade-in">
-          <div className="bg-white rounded-2xl p-6 text-center mb-4 shadow-sm">
+          <div className="bg-white rounded-2xl p-6 text-center mb-6 shadow-sm">
             <div className="w-20 h-20 bg-gradient-to-r from-slate-800 to-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl text-white">
               {isAdmin ? <Icon name="settings" className="w-10 h-10"/> : userType === 'manufacturer' ? '🏭' : '👤'}
             </div>
-            <h2 className="text-xl font-bold">{isAdmin ? '관리자' : userType === 'manufacturer' ? '제조업체 사용자' : '일반사용자'}</h2>
-            <p className="text-sm text-slate-500 mt-1">{userType === 'manufacturer' ? '제조업체 모드' : userType === 'admin' ? 'admin@kfi.or.kr' : '일반사용자 모드'}</p>
-            <div className="flex items-center justify-center gap-2 mt-2"><LiveBadge /></div>
+            <h2 className="text-xl font-bold">{isAdmin ? '관리자' : userType === 'manufacturer' ? '제조업체' : '일반사용자'}</h2>
+            {isAdmin && currentUser && <p className="text-sm text-slate-400 mt-1">{currentUser.email}</p>}
           </div>
-
-          {!isAdmin && (
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              <div className="bg-white rounded-2xl p-4 text-center shadow-sm"><p className="text-2xl font-bold">{userApplications.filter(a => ['submitted','reviewing'].includes(a.status)).length}</p><p className="text-xs text-slate-500">신청중</p></div>
-              <div className="bg-white rounded-2xl p-4 text-center shadow-sm"><p className="text-2xl font-bold">{userApplications.filter(a => a.status === 'approved').length}</p><p className="text-xs text-slate-500">완료</p></div>
-              <div className="bg-white rounded-2xl p-4 text-center shadow-sm"><p className="text-2xl font-bold">{bookmarks.length}</p><p className="text-xs text-slate-500">즐겨찾기</p></div>
-            </div>
-          )}
-
-          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-            {[
-              { icon: 'helpCircle', label: '문의하기', action: () => setActiveModal('help') },
-              { icon: 'info', label: '버전 정보', action: () => setActiveModal('version') },
-            ].map(menu => (
-              <button key={menu.label} onClick={menu.action} className="w-full flex items-center justify-between p-4 border-b last:border-0">
-                <div className="flex items-center gap-3"><div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center"><Icon name={menu.icon} className="w-5 h-5 text-slate-600" /></div><span className="font-medium">{menu.label}</span></div>
-                <Icon name="chevronRight" className="w-5 h-5 text-slate-400" />
-              </button>
-            ))}
-          </div>
+          <button onClick={handleLogout} className="w-full py-3 bg-red-50 text-red-500 font-semibold rounded-2xl border border-red-100">로그아웃</button>
         </div>
       );
 
@@ -2165,8 +2177,9 @@
                 {isClosed ? (
                   <button disabled className="flex-1 py-4 rounded-xl font-semibold bg-gray-300 text-gray-500">마감됨</button>
                 ) : (
-                  <button onClick={() => { 
-                    window.open('https://kfi.or.kr/portal/fgtIndsPromte01/promtePssrpAply/promtePssrpAply.do?menuNo=500018', '_blank');
+                  <button onClick={() => {
+                    const url = selectedProgram.applyUrl || 'https://www.kfi.or.kr';
+                    window.open(url, '_blank');
                   }} className="flex-1 py-4 rounded-xl font-semibold text-white bg-slate-800">
                     신청하기
                   </button>
@@ -2604,7 +2617,6 @@
           <NotificationPanel />
           <main>
             {currentPage === 'home' && (isAdmin ? <AdminDashboard /> : <HomePage />)}
-            {currentPage === 'status' && isAdmin && <AdminStatusPage />}
             {currentPage === 'calendar' && <CalendarPage />}
             {currentPage === 'mypage' && <MyPage />}
           </main>
